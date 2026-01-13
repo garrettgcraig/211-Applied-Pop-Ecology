@@ -1,0 +1,153 @@
+# Setup and analysis of Bison data using 
+# Christopher L Jerde
+# Notes: fitting common population growth models using discrete time models
+# and results of different model selection approaches
+########################################
+
+# 13 January 2026
+
+#Clear the R environment and remove science notation
+rm(list = ls())
+options(scipen = 999)
+
+#Libraries needed
+library(janitor) #cleans data and names
+library(here) #allows for localized file directory
+library(tidyverse) #makes R work nicely
+library(MuMIn) # for model selection
+library(patchwork) #for figures panels
+
+# We will use the YNP bison data.  
+# Data from here: https://datadryad.org/dataset/doi:10.5061/dryad.2bvq83c25
+# Note this data is OER!
+
+data<-read_csv(here("data","bison.csv")) 
+
+# Set data up for fitting
+Nt<-data |> select(bison) |> head(-1)
+Ntplus1<-data |> select(bison) |> slice(-1)
+
+model_data<-as.data.frame(c(Nt, Ntplus1)) |> 
+  rename(Nt=bison) |> 
+  rename(Ntplus1=bison.1)
+
+
+# MODELS
+#Discrete exponential (Malthusian growth)
+malthusian_model <- function(Nt, r) {
+  Ntplus1 <- (1 + r) * Nt
+  return(Ntplus1)
+}
+
+#Ricker growth 
+ricker_model <- function(Nt, r, K) {
+  Ntplus1 <- Nt * exp(r*(1-Nt/K))
+  return(Ntplus1)
+}
+
+
+#Discrete Logistic
+d_logistic_model <- function(Nt, r, K) {
+  Ntplus1 <- Nt + r * Nt * (1-Nt/K)
+  return(Ntplus1)
+}
+
+
+# Fitting with nls
+fit.malthusian <- nls(Ntplus1 ~ malthusian_model(Nt, r), data = model_data, 
+                  start = list(r = 0.3)) # need to use good starting values for it to work!
+
+fit.ricker <- nls(Ntplus1 ~ ricker_model(Nt, r, K), data = model_data, 
+                      start = list(r = 0.4, K = 3000))
+
+
+fit.discrete_logistic <-nls(Ntplus1 ~ d_logistic_model(Nt, r, K), data = model_data, 
+                            start = list(r = 0.3, K = 3000)) # need to use good starting values for it to work!
+
+
+#Model selection with BIC
+model.sel(fit.malthusian,fit.ricker, fit.discrete_logistic, rank="BIC")
+model.sel(fit.malthusian,fit.ricker, fit.discrete_logistic, rank="AIC")
+model.sel(fit.malthusian,fit.ricker, fit.discrete_logistic, rank="AICc")
+model.sel(fit.malthusian,fit.ricker, fit.discrete_logistic, rank="ICOMP")
+
+#PLOTS
+#organize data and use the fitted values to estimate the predicted values for plotting
+model_predict<-model_data |>
+  mutate(time=row_number())|>
+  mutate(mal_predict=(1 + coeffs(fit.malthusian)[1]) * Nt) |>
+  mutate(ricker_predict =  Nt * exp(coeffs(fit.ricker)[1] * (1-Nt/coeffs(fit.ricker)[2]))) |>
+  mutate(d_logistic_predict = Nt + coeffs(fit.discrete_logistic)[1] * Nt * (1-Nt/coeffs(fit.discrete_logistic)[2]))
+
+
+#malthusian
+fig_malthusian <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=mal_predict),color="red")+
+  geom_point(data=model_predict, aes(x=time, y=mal_predict),color="red",size=1.5)+
+  ggtitle("Malthusian model")+
+  labs(x="")+
+  theme_bw()
+
+fig_malthusian_single <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=mal_predict),color="red")+
+  geom_point(data=model_predict, aes(x=time, y=mal_predict),color="red",size=1.5)+
+  ggtitle("Malthusian model")+
+  theme_bw()
+
+ggsave(here("plots","malthusian.jpg"),fig_malthusian_single,
+       width=6, height=3, unit="in",dpi=300)
+
+
+#ricker
+fig_ricker <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=ricker_predict),color="lightblue")+
+  geom_point(data=model_predict, aes(x=time, y=ricker_predict),color="lightblue",size=1.5)+
+  ggtitle("Ricker model")+
+  labs(x="")+
+  theme_bw()
+
+fig_ricker_single <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=ricker_predict),color="lightblue")+
+  geom_point(data=model_predict, aes(x=time, y=ricker_predict),color="lightblue",size=1.5)+
+  ggtitle("Ricker model")+
+  theme_bw()
+
+ggsave(here("plots","ricker.jpg"),fig_ricker_single,
+       width=6, height=3, unit="in",dpi=300)
+
+#discrete logistic
+fig_d_logistic <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=d_logistic_predict),color="dodgerblue")+
+  geom_point(data=model_predict, aes(x=time, y=d_logistic_predict),color="dodgerblue",size=1.5)+
+  labs(x="")+
+  ggtitle("Discrete logistic model")+
+  theme_bw()
+
+fig_d_logistic_single <- ggplot() +
+  geom_point(data=data, aes(x = year-1970, y = bison),color="black",size=2) +
+  geom_line(data=model_predict, aes(x=time, y=d_logistic_predict),color="dodgerblue")+
+  geom_point(data=model_predict, aes(x=time, y=d_logistic_predict),color="dodgerblue",size=1.5)+
+  labs(x="year-1970")+
+  ggtitle("Discrete logistic model")+
+  theme_bw()
+
+ggsave(here("plots","d_logistic.jpg"),fig_d_logistic_single,
+       width=6, height=3, unit="in",dpi=300)
+
+
+
+#makes a stacke figure 
+ combined <- fig_malthusian / fig_ricker / fig_d_logistic_single
+ 
+ggsave(here("plots","combined_discrete.jpg"),combined,
+       width=6, height=10, unit="in",dpi=300)
+
+
+
+
+

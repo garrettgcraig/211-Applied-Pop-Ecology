@@ -1,0 +1,130 @@
+# Setup and analysis of Bison data using 
+# Christopher L Jerde
+# Notes: fitting common population growth models using continuous time model
+########################################
+
+# 7 January 2026
+
+#Clear the R environment
+rm(list = ls())
+
+#Libraries needed
+library(janitor) #cleans data and names
+library(here) #allows for localized file directory
+library(tidyverse) #makes R work nicely
+library(MuMIn) # for model selection
+#read here: https://eligurarie.github.io/EFB370/labs/labII.3/FittingLogisticGrowth.html
+
+#We will use the YNP bison data.  Sometimes, you may want to model density rather than counts. Why?
+#data from here: https://datadryad.org/dataset/doi:10.5061/dryad.2bvq83c25
+# Not this data is OER!
+
+#YNP Home range size of bison (Gates et al. 2006) 
+HRS<-7720 #sq.mi.
+
+data<-read_csv(here("data","bison.csv")) |>
+  mutate (density= bison/HRS) |> # density is bison per mi*mi
+  mutate (years=year-1970) # The fitting procedures like to start with t=0, so we need to adjust
+
+# Start by looking at the data!
+bison_ts<-ggplot(data, aes(x=year, y=density))+
+  geom_point()+
+  xlab("Year")+
+  ylab("Bison density (N/mi*mi)")+
+  xlim(1968, 2000)+
+  ggtitle("Bison Population density in YNP (1970-97)")+
+  theme_bw()
+
+ggsave(here("plots","bison_ts_density.jpg"),bison_ts, dpi=400, width=5,height=3, unit="in")
+
+
+# Basic model of logistic growth written as a function you define
+# Overview of writing a function:https://www.dataquest.io/blog/write-functions-in-r/
+# Video: https://www.youtube.com/watch?v=3uK1OzA7CTs
+N.logistic <- function(x, N0, K, r0) K/(1 + ((K - N0)/N0)*exp(-r0*x)) #You can write your own functions
+
+
+#Plot the best fit of the logistic model using ggplot
+# Non-Linear Least Squares, nls(), overview: https://datascienceplus.com/first-steps-with-non-linear-regression-in-r/
+model.logistic <- nls(density ~ N.logistic(years, N0, K, r0), data = data, #build in function for non-linear least squares that fits the function to the data
+                    start = list(N0 = 0.05, K = 0.4, r0 = 0.2)) #provides best guesses as starting points for the fit
+
+Logistic_fit_fig <- ggplot(data, aes(x=years, y=density))+
+  geom_function(fun = N.logistic, args=list(                               # args allows you to pass the estimates into the function
+                                 as.numeric(coef(model.logistic)[1]),
+                                 as.numeric(coef(model.logistic)[2]),
+                                 as.numeric(coef(model.logistic)[3])), colour = "blue", linewidth = 1) +
+  geom_point(size=2)+
+  theme_bw()
+
+ggsave(here("plots","logistic_fit_bison_density.jpg"),Logistic_fit_fig, dpi=400, width=5,height=3, unit="in")
+
+
+
+#########################################################################
+#Model can also be applied on the count data instead of density
+#########################################################################
+bison_ts_count<-ggplot(data, aes(x=year, y=bison))+
+  geom_point()+
+  xlab("Year")+
+  ylab("Bison counts")+
+  xlim(1968, 2000)+
+  ggtitle("Bison Population  in YNP (1970-97)")+
+  theme_bw()
+ggsave(here("plots","bison_ts_count.jpg"),bison_ts_count, dpi=400, width=5,height=3, unit="in")
+
+#Plot logistic model again, but with counts, using ggplot
+model.logistic.count <- nls(bison ~ N.logistic(years, N0, K, r0), data = data, #build in function for non-linear least squares
+                      start = list(N0 = 400, K = 3000, r0 = 0.2)) #provides best guesses as starting points for the fit
+
+Logistic_fit_fig_count <- ggplot(data, aes(x=years, y=bison))+
+  geom_function(fun = N.logistic, args=list(
+    as.numeric(coef(model.logistic.count)[1]),
+    as.numeric(coef(model.logistic.count)[2]),
+    as.numeric(coef(model.logistic.count)[3])), colour = "blue", linewidth = 1) +
+  geom_point(size=2)+
+  theme_bw()
+
+ggsave(here("plots","logistic_fit_bison_count.jpg"),Logistic_fit_fig_count, dpi=400, width=5,height=3, unit="in")
+
+
+#########################################################################
+#Now try exponential growth for counts
+#########################################################################
+
+N.exponential <- function(x, N0, r0) N0*(1+r0)^x 
+
+model.exp.count <- nls(bison ~ N.exponential(years, N0, r0), data = data, #build in function for non-linear least squares
+                            start = list(N0 = 400, r0 = 0.2))
+
+exp_fit_fig_count <- ggplot(data, aes(x=years, y=bison))+
+  geom_function(fun = N.exponential, args=list(
+    as.numeric(coef(model.exp.count)[1]),
+    as.numeric(coef(model.exp.count)[2])), colour = "red", linewidth = 1) +
+  geom_point(size=2)+
+  theme_bw()
+
+ggsave(here("plots","exp_fit_bison_count.jpg"),exp_fit_fig_count, dpi=400, width=5,height=3, unit="in")
+
+
+#how to choose between exponential or logistic? 
+
+#visual inspection
+count_combined <- ggplot(data, aes(x=years, y=bison))+
+  geom_function(fun = N.exponential, args=list(
+    as.numeric(coef(model.exp.count)[1]),
+    as.numeric(coef(model.exp.count)[2])), colour = "red", linewidth = 1) +
+  geom_function(fun = N.logistic, args=list(
+    as.numeric(coef(model.logistic.count)[1]),
+    as.numeric(coef(model.logistic.count)[2]),
+    as.numeric(coef(model.logistic.count)[3])), colour = "blue", linewidth = 1) +
+  geom_point(size=2)+
+  annotate(geom="text",x=3, y=3700, label="logistic", color="blue",size=4)+
+  annotate(geom="text",x=3, y=3300, label="exponential", color="red",size=4)+
+  theme_bw()
+
+ggsave(here("plots","combined_count.jpg"),count_combined, dpi=400, width=5,height=3, unit="in")
+
+#Try BIC! From MuMIn package
+#think back to ESM 206 and linear regression! Same idea here.
+model.sel(model.logistic.count,model.exp.count,rank="BIC")
